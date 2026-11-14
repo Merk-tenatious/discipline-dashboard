@@ -3,6 +3,9 @@
   "use strict";
   var L = window.DBDLogic;
   var KEY_MINE = "dbd.discipline.v1.mine", KEY_EX = "dbd.discipline.v1.example", KEY_MODE = "dbd.discipline.v1.mode";
+  /* Backup reminder keys. These sit beside the data and are not part of an export file. */
+  var KEY_LASTBK = "dbd.discipline.v1.lastBackupAt", KEY_FIRST = "dbd.discipline.v1.firstEntryAt", KEY_SNOOZE = "dbd.discipline.v1.backupSnoozeUntil";
+  var DAY_MS = 86400000, REMIND_DAYS = 14, SNOOZE_DAYS = 3;
   var FOOT = "\u00a9 2026 Nathan Hansen. A companion to Discipline by Design. For personal use.";
   var store = (function () {
     try { var k = "__dbd_test"; window.localStorage.setItem(k, "1"); window.localStorage.removeItem(k); return window.localStorage; }
@@ -26,11 +29,42 @@
       store.setItem(mode === "example" ? KEY_EX : KEY_MINE, JSON.stringify(state));
       store.setItem(KEY_MODE, mode);
       setSaveState();
+      if (mode === "mine") noteFirstEntry();
     };
     if (now) doIt(); else { setText("saveState", "Saving\u2026"); saveTimer = setTimeout(doIt, 300); }
   }
   function setSaveState() {
     setText("saveState", store.memoryOnly ? "Not saved: storage is off in this browser" : (mode === "example" ? "Example data" : "Saved on this device"));
+  }
+
+  /* ---------- backup reminder and saved storage ---------- */
+  var BLANK_JSON = JSON.stringify(L.normalize(L.blankData()));
+  function hasUserData(d) { try { return JSON.stringify(L.normalize(JSON.parse(JSON.stringify(d)))) !== BLANK_JSON; } catch (e) { return false; } }
+  function readTime(k) { var v = +store.getItem(k); return v > 0 ? v : null; }
+  function noteFirstEntry() {
+    if (readTime(KEY_FIRST) || !hasUserData(mineData())) return;
+    store.setItem(KEY_FIRST, String(Date.now()));
+    requestPersist();
+  }
+  function backupDue() {
+    if (mode !== "mine" || store.memoryOnly || !hasUserData(state)) return false;
+    var now = Date.now(), since = readTime(KEY_LASTBK) || readTime(KEY_FIRST), snooze = readTime(KEY_SNOOZE);
+    if (!since) return false;
+    if (snooze && now < snooze) return false;
+    return now - since >= REMIND_DAYS * DAY_MS;
+  }
+  function renderBackupBanner() { var b = $("backupBanner"); if (b) b.hidden = !backupDue(); }
+  var persisted = null;
+  function persistLine() {
+    return persisted ? "Saved storage: protected on this device." : "Saved storage: standard. Add this page to your home screen and export backups to keep it safe.";
+  }
+  function showPersist() { var e = $("persistLine"); if (e) e.textContent = persistLine(); }
+  function requestPersist() {
+    try {
+      if (!(navigator.storage && navigator.storage.persist && navigator.storage.persisted)) return;
+      navigator.storage.persisted().then(function (p) { return p ? true : navigator.storage.persist(); })
+        .then(function (p) { persisted = !!p; showPersist(); }, function () {});
+    } catch (e) { /* fail silently */ }
   }
 
   /* ---------- helpers ---------- */
@@ -83,6 +117,7 @@
     setText("appTitle", "Discipline by Design Dashboard");
     setText("appSub", sub);
     $("exampleBanner").hidden = mode !== "example";
+    renderBackupBanner();
     setSaveState();
   }
 
@@ -345,7 +380,7 @@
       ["4. Dashboard", "Your return rate, return time, and each week at a glance. The Next step line shows what your return protocol says to do after a miss."],
       ["5. Disruption Plan", "Write if-then plans for travel, busy seasons, holidays, illness, and the long return, before they arrive."],
       ["6. The next habit", "One habit at a time. When this one runs on its own, export a backup, then reset and start fresh for the next."],
-      ["7. Your data", "Everything you enter stays in this browser on this device. Export a backup now and then, and always before you switch phones or clear your browser. Import puts it back."],
+      ["7. Your data", "Everything you enter stays in this browser on this device. Export a backup now and then, and always before you switch phones or clear your browser. Import puts it back. If two weeks pass without a backup, a gold reminder appears at the top with an Export now button."],
       ["8. On your home screen", "On iPhone, open this page in Safari, tap Share, then Add to Home Screen. On Android, open it in Chrome, tap the menu, then Add to Home screen or Install app. It works offline after the first visit."]];
     var nums = [["Return", "The first Target or Floor day after one or more misses: the comeback repetition. It is marked in green."],
       ["Return time", "How many scheduled days you missed before that comeback. Missed Tuesday, back Wednesday: 1. From the book: \u201cOne day is excellent. Two is a warning. A week is a pattern forming.\u201d"],
@@ -373,12 +408,14 @@
   function vData() {
     return privacyNote() +
       '<section class="card"><h2>Back up and restore</h2><p class="lead">A backup is a small file with all of your entries. Keep it somewhere safe, such as your email or cloud drive.</p>' +
+      '<p class="data-status"><span id="lastBackupLine">' + esc(lastBackupLine()) + '</span><br><span id="persistLine">' + esc(persistLine()) + "</span></p>" +
       '<div class="btn-row"><button type="button" class="btn" data-action="export">Export a backup</button><button type="button" class="btn light" data-action="import">Import a backup</button></div>' +
       (mode === "example" ? '<p class="hint">You are looking at the example. Export and Import work with your own entries, not Maya\'s.</p>' : "") + "</section>" +
       '<section class="card"><h2>See an example</h2><p class="lead">Load Maya, the composite baker from Chapter 13, to see how a filled-in dashboard looks. Your own entries are kept separately and are not changed.</p><div class="btn-row">' +
       (mode === "example" ? '<button type="button" class="btn gold" data-action="clearExample">Clear example and go back to my data</button>' : '<button type="button" class="btn gold" data-action="loadExample">Load Maya example</button>') + "</div></section>" +
       '<section class="card"><h2>Start over</h2><p class="lead">Reset erases your entries from this device. Export a backup first if you might want them.</p><button type="button" class="btn danger" data-action="reset">Reset my data</button></section>';
   }
+  function lastBackupLine() { var t = readTime(KEY_LASTBK); return "Last backup: " + (t ? fmt(new Date(t)) : "never"); }
   function vMore() {
     return '<section class="card more-list"><a href="#disruption">Disruption Plan <span>Storms and the long return</span></a><a href="#howto">How to Use <span>Steps and how the numbers work</span></a><a href="#data">Your data <span>Backup, example, reset</span></a></section>' + privacyNote();
   }
@@ -395,6 +432,7 @@
     } else if (a === "clearDay") { state.days[n].s = ""; state.days[n].n = ""; save(); rerenderKeepScroll(); }
     else if (a === "closeDetail") { selected = null; rerenderKeepScroll(); }
     else if (a === "export") doExport();
+    else if (a === "snoozeBackup") { store.setItem(KEY_SNOOZE, String(Date.now() + SNOOZE_DAYS * DAY_MS)); renderBackupBanner(); toast("Okay. I'll remind you again in a few days."); }
     else if (a === "import") $("importFile").click();
     else if (a === "loadExample") {
       if (mode === "mine") save(true);
@@ -404,7 +442,7 @@
       store.removeItem(KEY_EX); mode = "mine"; store.setItem(KEY_MODE, mode); state = load(mode); selected = null; render(); toast("Example cleared. You are back to your own entries.");
     } else if (a === "reset") {
       if (window.confirm("Erase all of your entries on this device? This cannot be undone. Export a backup first if you might want them.")) {
-        store.removeItem(KEY_MINE); if (mode === "mine") state = L.blankData(); else store.setItem(KEY_MODE, "example");
+        store.removeItem(KEY_MINE); store.removeItem(KEY_LASTBK); store.removeItem(KEY_FIRST); store.removeItem(KEY_SNOOZE); if (mode === "mine") state = L.blankData(); else store.setItem(KEY_MODE, "example");
         selected = null; render(); toast("Your entries were erased.");
       }
     }
@@ -419,6 +457,8 @@
     var blob = new Blob([JSON.stringify(payload, null, 1)], { type: "application/json" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "discipline-dashboard-backup-" + stamp + ".json";
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    store.setItem(KEY_LASTBK, String(now.getTime())); store.removeItem(KEY_SNOOZE);
+    renderBackupBanner(); setText("lastBackupLine", lastBackupLine());
     toast("Backup saved to your downloads.");
   }
   function doImport(file) {
@@ -429,6 +469,7 @@
       if (!data || !Array.isArray(data.days)) { toast("That file isn't a dashboard backup."); return; }
       if (!window.confirm("Replace your current entries on this device with this backup?")) return;
       store.setItem(KEY_MINE, JSON.stringify(L.normalize(data))); store.removeItem(KEY_EX); mode = "mine"; store.setItem(KEY_MODE, mode); state = load(mode); selected = null;
+      store.setItem(KEY_LASTBK, String(Date.now())); store.removeItem(KEY_SNOOZE); noteFirstEntry();
       render(); toast("Backup restored.");
     };
     fr.readAsText(file);
@@ -458,7 +499,9 @@
   }
   window.addEventListener("hashchange", route);
   window.addEventListener("storage", function (e) { if (e.key && e.key.indexOf("dbd.discipline") === 0) { mode = store.getItem(KEY_MODE) === "example" && store.getItem(KEY_EX) ? "example" : "mine"; state = load(mode); render(); } });
+  noteFirstEntry();
   route();
+  requestPersist();
 
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
     window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });

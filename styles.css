@@ -179,3 +179,8 @@ footer.foot{font-size:12px;color:var(--muted);text-align:center;padding:16px 10p
 }
 @media print{.bottom,.side,.top .save-state,.btn{display:none}}
 .example-banner[hidden],[hidden]{display:none !important}
+.backup-banner{background:var(--gold);color:var(--deep);font-size:14px;font-weight:600;padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;border-bottom:1px solid #a8843a}
+.backup-banner[hidden]{display:none}
+.backup-banner .btn-row{gap:8px}
+.btn.gold-dark{background:var(--deep);border-color:var(--deep);color:#fff}
+.data-status{font-size:14px;color:var(--navy);margin:0 0 12px;line-height:1.5}
